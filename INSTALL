@@ -1,0 +1,5 @@
+#!/bin/bash
+version=$(grep -o "'.*'" dove/__init__.py | sed "s/'//g")
+python3 setup.py bdist_wheel
+sudo pip3 uninstall dove
+sudo pip3 install dist/dove-${version}-py3-none-any.whl

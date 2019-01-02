@@ -1,0 +1,6 @@
+id,father,mother,affected,sex,index,path
+a,0,0,0,0,0,father.csv
+b,0,0,0,1,0,mother.csv
+c,a,b,1,0,1,index.csv
+d,a,b,1,0,0,affectedsibling.csv
+d,a,b,0,0,0,unaffectedsibling.csv
