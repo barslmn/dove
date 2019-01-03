@@ -7,6 +7,7 @@ import pandas as pd
 from pandas.io.json import json_normalize
 from dove.utils import updateomim
 from dove.utils import updatehpo
+from dove.utils import updateclinvar
 from dove.utils.vcf import Vcf
 from dove.utils.ensemblapi import EnsemblApi
 
@@ -21,12 +22,13 @@ def chunks(l, n):
 
 class OnlineVariantAnnotation(object):
 
-    def __init__(self, vcf_file=None, mode='file', outputfile=None, omim=False, hpo=False, resume=False, query_chunks=199, read_chunks=None, table_cols=None):
+    def __init__(self, vcf_file=None, mode='file', outputfile=None, omim=False, hpo=False, clinvar=False, resume=False, query_chunks=199, read_chunks=None, table_cols=None):
         self.vcf_file = vcf_file
         self.mode = mode
         self.outputfile = outputfile
         self.omim = omim
         self.hpo = hpo
+        self.clinvar = clinvar
         self.resume = resume
         self.query_chunks = query_chunks
         self.read_chunks = read_chunks
@@ -55,8 +57,9 @@ class OnlineVariantAnnotation(object):
 
         if self.omim == True:
             if not os.path.exists(cache_path + '/omim.csv'):
-                self.omim = self.try_omim()
-                if self.omim == True:
+                # This functions resets self.omim to True or False
+                self.omim = self.try_download('omim')
+                if self.omim == True:  # Thats why there is a second check.
                     self.table_cols.insert(
                         len(self.table_cols), 'omim_phenotypes')
             else:
@@ -64,12 +67,29 @@ class OnlineVariantAnnotation(object):
 
         if self.hpo == True:
             if not os.path.exists(cache_path + '/hpo.csv'):
-                self.hpo = self.try_hpo()
+                self.hpo = self.try_download('HPO')
                 if self.hpo == True:
                     self.table_cols.insert(
                         len(self.table_cols), 'HPO_term_names')
             else:
                 self.table_cols.insert(len(self.table_cols), 'HPO_term_names')
+
+        if self.clinvar == True:
+            if not os.path.exists(cache_path + '/clinvar.vcf.gz'):
+                self.clinvar = self.try_download('clinvar')
+                if self.clinvar == True:
+                    self.read_clinvar_vcf()
+            else:
+                self.read_clinvar_vcf()
+
+    def read_clinvar_vcf(self):
+        with Vcf(cache_path + '/clinvar.vcf.gz') as vcf:
+            generic_header = vcf.generic_header
+            self.cln_df = vcf.get_variant_info(concat=True, drop=True)
+        self.cln_df = self.cln_df[[col for col in list(
+            cln_df) if col.startswith('CLN')] + ['CHROM', 'POS', 'ALT']]
+        self.table_cols = self.table_cols + \
+            [col for col in list(cln_df) if col not in vcf.generic_header]
 
     def process_vcf(self):
         self.df_vcf['input'] = self.df_vcf['CHROM'].map(str) + ' ' + \
@@ -123,6 +143,11 @@ class OnlineVariantAnnotation(object):
         self.df_anno_table = pd.merge(self.df_anno_table, gene_table,
                                       on='gene_symbol', how='left')
 
+    def position_base_annotation(self, vdf):
+        '''This function is used for clinvar annotation.'''
+        self.df_anno_table = pd.merge(self.df_anno_table, vdf,
+                                      on=['CHROM', 'POS', 'ALT'], how='left')
+
     def write_table(self):
         if os.path.exists(self.outputfile):
             self.df_anno_table.to_csv(
@@ -147,6 +172,8 @@ class OnlineVariantAnnotation(object):
                 self.gene_base_annotation(os.path.join(cache_path, 'omim.csv'))
             if self.hpo == True:
                 self.gene_base_annotation(os.path.join(cache_path, 'hpo.csv'))
+            if self.clinvar == True:
+                self.position_base_annotation(self.cln_df)
 
             self.add_missing_cols()
             self.df_anno_table = self.df_anno_table[[
@@ -167,8 +194,8 @@ class OnlineVariantAnnotation(object):
             for col in diff_cols:
                 self.df_anno_table[col] = ""
 
-    def try_omim(self):
-        sys.stdout.write('Omim file does not exists!')
+    def try_download(self, down_term):
+        sys.stdout.write('{} file does not exists!'.format(down_term))
         while True:
             userinput = input('Do you want to download it?yes/no?')
             if userinput not in ['yes', 'no', 'y', 'n']:
@@ -176,30 +203,20 @@ class OnlineVariantAnnotation(object):
                     'Enter yes to download or no to cancel...')
                 continue
             if userinput in ['no', 'n']:
-                sys.stdout.write('Setting omim to False and continuing...')
-                return False
-            if userinput in ['yes', 'y']:
-                apikey = input('Please enter omim api key:')
-                if updateomim.main(apikey):
-                    return True
-                else:
-                    sys.stdout.write('Something gone wrong. Retry?')
-                    continue
-
-    def try_hpo(self):
-        sys.stdout.write('HPO file does not exists!')
-        while True:
-            userinput = input('Do you want to download it?yes/no?')
-            if userinput not in ['yes', 'no', 'y', 'n']:
                 sys.stdout.write(
-                    'Enter yes to download or no to cancel...')
-                continue
-            if userinput in ['no', 'n']:
-                sys.stdout.write('Setting HPO to False and continuing...')
+                    'Setting {} to False and continuing...'.format(down_term))
                 return False
             if userinput in ['yes', 'y']:
-                if updatehpo.main():
-                    return True
+                if down_term == 'omim':
+                    apikey = input('Please enter omim api key:')
+                    if updateomim.main(apikey):
+                        return True
+                if down_term == 'HPO':
+                    if updatehpo.main():
+                        return True
+                if down_term == 'clinvar':
+                    if updateclinvar.main():
+                        return True
                 else:
                     sys.stdout.write('Something gone wrong. Retry?')
                     continue
@@ -258,7 +275,7 @@ class OnlineVariantAnnotation(object):
             self.write_table()
         sys.stdout.write(
             'Finished annotation for {}\n'.format(self.header[-1]))
-    
+
     def annotate_to_df(self):
         self.process_vcf()
         query_variants = self.df_vcf['input'].tolist()

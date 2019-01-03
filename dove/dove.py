@@ -7,6 +7,7 @@ import argparse
 from argparse import RawTextHelpFormatter
 from dove.utils import updateomim
 from dove.utils import updatehpo
+from dove.utils import updateclinvar
 from dove.utils import copyexamplefiles
 from dove.core import variantfilter
 from dove.core import multigenomeanalysis
@@ -72,8 +73,10 @@ def get_args():
                             transcript_id trembl uniparc variant_allele variant_class''')
     parser_OVA.add_argument('-m', '--omim', required=False, dest='omim', action='store_true',
                             help='Enables gene annotation to omim diseases.')
-    parser_OVA.add_argument('--hpo', required=False, dest='hpo', action='store_true',
+    parser_OVA.add_argument('-p', '--hpo', required=False, dest='hpo', action='store_true',
                             help='Enables gene annotation to HPO.')
+    parser_OVA.add_argument('-l', '--clinvar', required=False, dest='clinvar', action='store_true',
+                            help='Enables variant annotation to Clinvar.')
     parser_OVA.add_argument('-r', '--resume', required=False, dest='resume', action='store_true',
                             help='Resumes interrupted annotation process.')
 
@@ -162,6 +165,9 @@ def get_args():
     parser_updatehpo = subparsers.add_parser(
         'updatehpo', help='install/update hpo table')
 
+    parser_updateclinvar = subparsers.add_parser(
+        'updateclinvar', help='install/update clinvar vcf')
+
     if len(sys.argv[1:]) == 0:
         parser.print_help()
         parser.exit()
@@ -179,6 +185,7 @@ def main():
         variantfilter.main(args)
     if args.tool == 'examplefile':
         copyexamplefiles.main(args)
+
     if args.tool == 'updateomim':
         if updateomim.main(args):
             sys.stdout.write('Successfully downloaded omim data.\n')
@@ -187,6 +194,11 @@ def main():
     if args.tool == 'updatehpo':
         if updatehpo.main(args):
             sys.stdout.write('Successfully downloaded hpo data.\n')
+        else:
+            sys.stdout.write('Something gone wrong. Please try again.\n')
+    if args.tool == 'updateclinvar':
+        if updateclinvar.main(args):
+            sys.stdout.write('Successfully downloaded clinvar vcf.\n')
         else:
             sys.stdout.write('Something gone wrong. Please try again.\n')
 
