@@ -147,7 +147,7 @@ class OnlineVariantAnnotation(object):
     def position_base_annotation(self, vdf):
         '''This function is used for clinvar annotation.'''
         self.df_anno_table = pd.merge(self.df_anno_table, vdf,
-                                      on=['CHROM', 'POS', 'ALT'], how='left')
+                                      on=['CHR', 'POS', 'ALT'], how='left')
 
     def write_table(self):
         if os.path.exists(self.outputfile):
