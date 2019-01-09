@@ -22,6 +22,9 @@ def get_args():
     parser.add_argument('-v', '--verbose', required=False, action='store_true',
                         help='WIP.Write what is happening to stdout.')
 
+    parser.add_argument('--version',
+                        action='version', version=__version__)
+
     subparsers = parser.add_subparsers(dest='tool')
 
     parser_OVA = subparsers.add_parser(

@@ -87,9 +87,10 @@ class OnlineVariantAnnotation(object):
             generic_header = vcf.generic_header
             self.cln_df = vcf.get_variant_info(concat=True, drop=True)
         self.cln_df = self.cln_df[[col for col in list(
-            cln_df) if col.startswith('CLN')] + ['CHROM', 'POS', 'ALT']]
+            self.cln_df) if col.startswith('CLN')] + ['CHROM', 'POS', 'ALT']]
+        self.cln_df.columns = ['CHR'] + list(self.cln_df)[1:]
         self.table_cols = self.table_cols + \
-            [col for col in list(cln_df) if col not in vcf.generic_header]
+            [col for col in list(self.cln_df) if col not in vcf.generic_header]
 
     def process_vcf(self):
         self.df_vcf['input'] = self.df_vcf['CHROM'].map(str) + ' ' + \
@@ -294,6 +295,7 @@ def main(args):
     outputfile = args.output
     omim = args.omim
     hpo = args.hpo
+    clinvar = args.clinvar
     resume = args.resume
     query_chunks = args.query_chunks
     read_chunks = args.read_chunks
@@ -303,6 +305,7 @@ def main(args):
                                   outputfile=outputfile,
                                   omim=omim,
                                   hpo=hpo,
+                                  clinvar=clinvar,
                                   resume=resume,
                                   query_chunks=query_chunks,
                                   read_chunks=read_chunks, table_cols=table_cols)
