@@ -88,9 +88,9 @@ class OnlineVariantAnnotation(object):
             self.cln_df = vcf.get_variant_info(concat=True, drop=True)
         self.cln_df = self.cln_df[[col for col in list(
             self.cln_df) if col.startswith('CLN')] + ['CHROM', 'POS', 'ALT']]
-        self.cln_df.columns = ['CHR'] + list(self.cln_df)[1:]
         self.table_cols = self.table_cols + \
             [col for col in list(self.cln_df) if col not in vcf.generic_header]
+        self.cln_df.columns = ['CHR'] + list(self.cln_df)[1:]
 
     def process_vcf(self):
         self.df_vcf['input'] = self.df_vcf['CHROM'].map(str) + ' ' + \
