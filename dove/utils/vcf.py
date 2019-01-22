@@ -203,6 +203,10 @@ class Vcf():
         else:
             sample_names = sample_names
 
+        if len(sample_names) < 1:
+            sys.exit('No sample column found.')
+
+
         samples_df_dict = {}
         for sample in sample_names:
 

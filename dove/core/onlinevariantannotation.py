@@ -94,8 +94,8 @@ class OnlineVariantAnnotation(object):
 
     def process_vcf(self):
         self.df_vcf['input'] = self.df_vcf['CHROM'].map(str) + ' ' + \
-            self.df_vcf['POS'].map(str) + ' ' + self.df_vcf['ID'] + ' ' + self.df_vcf['REF'] + \
-            ' ' + self.df_vcf['ALT']  # create vep input
+            self.df_vcf['POS'].map(str) + ' ' + self.df_vcf['ID'].map(str) + ' ' + self.df_vcf['REF'].map(str) + \
+            ' ' + self.df_vcf['ALT'].map(str)  # create vep input
 
     def parse_colocated(self):
         popkeys = ['assembly_name', 'strand', 'id']
