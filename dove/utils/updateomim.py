@@ -25,8 +25,11 @@ class OmimApi():
 
     def mimnumbers(self):
         try:
-            dfmim2gene = pd.read_table(
-                'https://omim.org/static/omim/data/mim2gene.txt', skiprows=4)
+            dfmim2gene = pd.read_csv(
+                'https://omim.org/static/omim/data/mim2gene.txt',
+                skiprows=4,
+                sep='\t',
+            )
         except urllib.error.URLError:
             raise SystemExit('Check internet connection.')
         return dfmim2gene['# MIM Number'].tolist()

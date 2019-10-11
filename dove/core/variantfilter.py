@@ -3,17 +3,19 @@ __author__ = 'bars'
 
 import pandas as pd
 from dove.utils.vcf import Vcf
+from dove.utils.bed import Bed
 
 
 class VariantFilter:
 
     """Docstring for VariantFilter. """
 
-    def __init__(self, df, file_type, filter_columns, drop_columns=None, bed_file=None):
+    def __init__(self, df, file_type, filter_columns, drop_columns=None, keep_columns=None, bed_file=None):
         self.df = df
         self.file_type = file_type
         self.filter_columns = filter_columns
         self.drop_columns = drop_columns
+        self.keep_columns = keep_columns
         self.bed_file = bed_file
 
     def filter_variants(self):
@@ -21,35 +23,36 @@ class VariantFilter:
             self.df = self.filter_with_bed()
 
         if self.filter_columns is not None:
-            list_of_filter_dicts = []
-            for filter_column in self.filter_columns:
-                filter_dict = {'column': filter_column[0],
-                               'filter_option': filter_column[1].lower(),
-                               'filter_args': filter_column[2:]}
-                list_of_filter_dicts.append(filter_dict)
+            filter_columns = [
+                {
+                    'column': filter_column[0],
+                    'filter_option': filter_column[1].lower(),
+                    'filter_args': filter_column[2:],
+                } for filter_column in self.filter_columns
+            ]
 
-            for filter_dict in list_of_filter_dicts:
-                if filter_dict['filter_option'] in self.in_ex_options('both'):
+            for filter_column in filter_columns:
+                if filter_column['filter_option'] in self.in_ex_options('all'):
                     self.df = self.includes_excludes(
-                        filter_dict['column'], filter_dict['filter_option'], filter_dict['filter_args'])
-                if filter_dict['filter_option'] in self.eq_ne_options('both'):
+                        filter_column['column'], filter_column['filter_option'], filter_column['filter_args'])
+                if filter_column['filter_option'] in self.eq_ne_options('all'):
                     self.df = self.equals_notequals(
-                        filter_dict['column'], filter_dict['filter_option'], filter_dict['filter_args'])
-                if filter_dict['filter_option'] in self.l_g_options('all'):
+                        filter_column['column'], filter_column['filter_option'], filter_column['filter_args'])
+                if filter_column['filter_option'] in self.l_g_options('all'):
                     self.df = self.less_greater(
-                        filter_dict['column'], filter_dict['filter_option'], filter_dict['filter_args'])
+                        filter_column['column'], filter_column['filter_option'], filter_column['filter_args'])
 
         if self.drop_columns is not None:
             self.df.drop_duplicates(self.drop_columns, inplace=True)
 
+        if self.keep_columns is not None:
+            self.df = self.df[self.keep_columns]
+
         return self.df
 
     def filter_with_bed(self):
-        df_bed = pd.read_table(self.bed_file,
-                               usecols=[0, 1, 2],
-                               delim_whitespace=True,
-                               names=['CHR', 'START', 'END'],
-                               dtype={'START': int, 'END': int})
+        bed = Bed(self.bed_file)
+        df_bed = bed.from_file()
 
         if self.file_type == 'annotation':
             self.df['POS'] = self.df['LOC'].str.split('-').str[0]
@@ -70,8 +73,12 @@ class VariantFilter:
     def equals_notequals(self, column, filter_option, filter_args):
         df_filter = pd.DataFrame(filter_args, columns=[column])
         if filter_option in self.eq_ne_options('eq'):
+            if filter_args[0].lower() in ['none', 'null', 'nan']:
+                return self.df[self.df[column].isnull()]
             return self.df[self.df[column].isin(df_filter[column])]
         if filter_option in self.eq_ne_options('ne'):
+            if filter_args[0].lower() in ['none', 'null', 'nan']:
+                return self.df[~self.df[column].isnull()]
             return self.df[~self.df[column].isin(df_filter[column])]
 
     def less_greater(self, column, filter_option, filter_args):
@@ -95,7 +102,7 @@ class VariantFilter:
     def eq_ne_options(self, option):
         eqs = ['eq', 'equal', 'equals']
         nes = ['ne', 'notequals', 'not_equals']
-        if option == 'both':
+        if option == 'all':
             return eqs + nes
         if option == 'eq':
             return eqs
@@ -127,15 +134,12 @@ class VariantFilter:
     def in_ex_options(self, option):
         ins = ['in', 'include', 'includes']
         exs = ['ex', 'exclude', 'excludes']
-        if option == 'both':
+        if option == 'all':
             return ins + exs
         if option == 'in':
             return ins
         if option == 'ex':
             return exs
-
-    def check_input(self):
-        pass
 
 
 def main(args):
@@ -144,16 +148,23 @@ def main(args):
     bed_file = args.bed_file
     filter_columns = args.column
     drop_columns = args.drop
+    keep_columns = args.keep
 
+    if input_file.endswith('.tsv'):
+        df = pd.read_csv(input_file, sep='\t', low_memory=False)
+        VF = VariantFilter(df, 'annotation', filter_columns,
+                           drop_columns, keep_columns, bed_file)
+        df = VF.filter_variants()
+        df.to_csv(output_file, sep='\t', index=False)
     if input_file.endswith('.csv'):
         df = pd.read_csv(input_file, low_memory=False)
         VF = VariantFilter(df, 'annotation', filter_columns,
-                           drop_columns, bed_file)
+                           drop_columns, keep_columns, bed_file)
         df = VF.filter_variants()
         df.to_csv(output_file, index=False)
     if input_file.endswith(('.vcf', '.vcf.gz')):
         with Vcf(input_file) as vcf:
             VF = VariantFilter(vcf.vdf, 'vcf', filter_columns,
-                               drop_columns, bed_file)
+                               drop_columns, keep_columns, bed_file)
             vcf.vdf = VF.filter_variants()
             vcf.to_vcf(output_file)

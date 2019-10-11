@@ -122,15 +122,18 @@ class Vcf():
         low_memory=False reads columns as object
         compression for gzip vcf files.
         chunksize pass'''
-        self.variant_df = pd.read_table(self.vcf_file,
-                                        comment='#',
-                                        delim_whitespace=True,
-                                        names=self.header,
-                                        low_memory=False,
-                                        compression=self.compression)
+        self.variant_df = pd.read_csv(self.vcf_file,
+                                      dtype=str,
+                                      sep='\t',
+                                      comment='#',
+                                      delim_whitespace=True,
+                                      names=self.header,
+                                      low_memory=False,
+                                      compression=self.compression)
         # chunks WIP
         # if self.chunksize is not None:
-        #     for vdf_chunk in pd.read_table(self.vcf_file,
+        #     for vdf_chunk in pd.read_csv(self.vcf_file,
+        #                                    sep='\t',
         #                                    comment='#',
         #                                    names=self.header,
         #                                    low_memory=False,
@@ -139,11 +142,13 @@ class Vcf():
         #         yield vdf_chunk
 
     def from_string(self):
-        self.variant_df = pd.read_table(StringIO(self.vcf_file),
-                                        comment='#',
-                                        delim_whitespace=True,
-                                        names=self.header,
-                                        low_memory=False)
+        self.variant_df = pd.read_csv(StringIO(self.vcf_file),
+                                      dtype=str,
+                                      sep='\t',
+                                      comment='#',
+                                      delim_whitespace=True,
+                                      names=self.header,
+                                      low_memory=False)
 
     def get_variant_info(self, concat=False, drop=False):
         # Create key set from all rows
@@ -188,9 +193,9 @@ class Vcf():
         variant_info_df = pd.DataFrame.from_dict(variant_info_dict)
         variant_info_df.set_index('index', inplace=True)
 
-        if concat == True:
+        if concat:
             new_df = pd.concat([self.vdf, variant_info_df], axis=1)
-            if drop == True:
+            if drop:
                 new_df.drop('INFO', axis=1, inplace=True)
             return new_df
         else:
@@ -205,7 +210,6 @@ class Vcf():
 
         if len(sample_names) < 1:
             sys.exit('No sample column found.')
-
 
         samples_df_dict = {}
         for sample in sample_names:
@@ -242,12 +246,12 @@ class Vcf():
             sample_format_df.set_index('index', inplace=True)
             samples_df_dict[sample] = sample_format_df
 
-        if concat == True:
+        if concat:
             for sample in samples_df_dict.keys():
                 samples_df_dict[sample] = pd.concat(
                     [self.vdf, samples_df_dict[sample]], axis=1)
 
-            if drop == True:
+            if drop:
                 if len(samples_df_dict) == 1:
                     samples_df_dict[sample_names[0]] = samples_df_dict[sample].drop(
                         sample_names[0], axis=1)

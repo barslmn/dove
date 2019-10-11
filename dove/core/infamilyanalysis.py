@@ -1,20 +1,16 @@
 # -*- coding: utf-8 -*-
 __author__ = 'bars'
 
-'''
-Tool for filtering ensembl annotation tables.
-'''
-
-__author__ = 'bars'
-
+from dove.utils.vcf import Vcf
 import pandas as pd
-from dove.utils.parsepedigree import ParsePedigree
+
 
 def fzygo(df, zygosity):
     if zygosity == '0/1':
         return df[df['GT'] != '1/1']
     if zygosity == '1/1':
         return df[df['GT'] != '0/1']
+
 
 def autosomal_recessive(index, mother, father):
     # Disease causing variant must be homozygote in index and heterozygote in parents
@@ -130,110 +126,124 @@ def Y_linked(index, mother, father):
     pass
 
 
-def preprocess_table(path):
-    df = pd.read_csv(path, low_memory=False)
-    df['Position'] = df['CHR'].map(str) + ':' + df['LOC'].map(str)
+def preprocess_table(member):
+    if member['file_path'].endswith('csv'):
+        df = pd.read_csv(member['file_path'], low_memory=False)
+        df['Position'] = df['CHR'].map(str) + ':' + df['LOC'].map(str)
+    if member['file_path'].endswith(('vcf', 'vcf.gz',)):
+        with Vcf(member['file_path']) as vcf:
+            vcf.vdf = vcf.get_sample_format(concat=True)
+            df = vcf.vdf
+            df['Position'] = df['CHROM'].map(str) + ':' + df['POS'].map(str)
     return df
 
 
-def trio(index_path, mother_path, father_path, pattern):
-    dfindex = preprocess_table(index_path)
-    dfmother = preprocess_table(mother_path)
-    dffather = preprocess_table(father_path)
+def trio(index, mother, father, pattern):
+    df_index = preprocess_table(index)
+    df_mother = preprocess_table(mother)
+    df_father = preprocess_table(father)
 
     if pattern == 'AR':
-        df = autosomal_recessive(dfindex, dfmother, dffather)
+        df = autosomal_recessive(df_index, df_mother, df_father)
     if pattern == 'AD':
-        df = autosomal_dominant(dfindex, dfmother, dffather)
+        df = autosomal_dominant(df_index, df_mother, df_father)
     if pattern == 'CH':
-        df = compound_heterozygote(dfindex, dfmother, dffather)
+        df = compound_heterozygote(df_index, df_mother, df_father)
     if pattern == 'DN':
-        df = de_novo(dfindex, dfmother, dffather)
+        df = de_novo(df_index, df_mother, df_father)
     return df
 
 
-def siblings(index, family, dfindex=None):
-    if dfindex is None:
-        dfindex = preprocess_table(index['path'])
-    dfindex_het = fzygo(dfindex, '0/1')
-    dfindex_hom = fzygo(dfindex, '1/1')
-    for i, member in enumerate(family):
-        if member['index'] == 1:
-            family.pop(i)
+def siblings(index, siblings_list, df_index=None):
+    if df_index is None:
+        df_index = preprocess_table(index)
+    df_index_het = fzygo(df_index, '0/1')
+    df_index_hom = fzygo(df_index, '1/1')
 
-    for member in family:
-        if member['mother'] == index['mother'] and member['father'] == index['father']:
-            if member['affected'] == 1:
-                dfasibling = preprocess_table(member['path'])
-                dfasibling_het = fzygo(dfasibling, '0/1')
-                dfasibling_hom = fzygo(dfasibling, '1/1')
-                dfindex_hom = pd.merge(dfindex_hom, dfasibling_hom[['Position', 'transcript_id']], on=[
-                    'Position', 'transcript_id'])
-                dfindex_het = pd.merge(dfindex_het, dfasibling_het[['Position', 'transcript_id']], on=[
-                    'Position', 'transcript_id'])
-                dfindex = pd.concat(
-                    [dfindex_hom, dfindex_het], ignore_index=True)
+    for sibling in siblings_list:
+        if sibling['condition'] == 'affected':
+            df_asibling = preprocess_table(sibling)
+            df_asibling_het = fzygo(df_asibling, '0/1')
+            df_asibling_hom = fzygo(df_asibling, '1/1')
 
-            if member['affected'] == 0:
-                dfusibling = preprocess_table(member['path'])
-                dfusibling_het = fzygo(dfusibling, '0/1')
-                dfindex_het = pd.merge(dfindex_het, dfusibling_het[['Position', 'transcript_id']], on=[
-                    'Position', 'transcript_id'])
-                # Following line works but is stupid and should be changed.
-                dfindex = dfindex[~(dfindex['Position'] + dfindex['transcript_id']).isin(
-                    dfusibling['Position'] + dfusibling['transcript_id'])]
-                dfindex = dfindex.append(dfindex_het, ignore_index=True)
-    dfindex.drop('Position', axis=1, inplace=True)
-    dfindex.sort_values(by=['CHR', 'LOC'], ascending=[
-        True, True], inplace=True)
-    return dfindex
+            df_index_hom = pd.merge(
+                df_index_hom,
+                df_asibling_hom[['Position', 'transcript_id']],
+                on=['Position', 'transcript_id']
+            )
+            df_index_het = pd.merge(
+                df_index_het,
+                df_asibling_het[['Position', 'transcript_id']],
+                on=['Position', 'transcript_id']
+            )
+
+            df_index = pd.concat(
+                [df_index_hom, df_index_het], sort=False, ignore_index=True)
+
+        if sibling['condition'] == 'normal':
+            df_nsibling = preprocess_table(sibling)
+            df_nsibling_het = fzygo(df_nsibling, '0/1')
+            df_index_het = pd.merge(
+                df_index_het,
+                df_nsibling_het[['Position', 'transcript_id']],
+                on=['Position', 'transcript_id']
+            )
+
+            df_index = df_index[~(df_index['Position'] + df_index['transcript_id']).isin(
+                df_nsibling['Position'] + df_nsibling['transcript_id'])]
+            df_index = df_index.append(df_index_het, ignore_index=True)
+
+    df_index.drop('Position', axis=1, inplace=True)
+
+    df_index.sort_values(
+        by=['CHR', 'LOC'],
+        ascending=[True, True],
+        inplace=True
+    )
+    return df_index
+
+
+def check_input(relatives):
+    # Prettify
+    relatives = [
+        {
+            'generation': relative[0],
+            'degree': relative[1],
+            'sex': relative[2],
+            'condition': relative[3],
+            'file_path': relative[4]
+        } for relative in relatives
+    ]
+    return relatives
+
+
+def get_parents(relatives):
+    for relative in relatives:
+        if relative['generation'] == '-1' and relative['degree'] == '1' and relative['sex'] == 'male':
+            father = relative
+        if relative['generation'] == '-1' and relative['degree'] == '1' and relative['sex'] == 'female':
+            mother = relative
+    return father, mother
+
+
+def get_siblings(relatives):
+    return [relative for relative in relatives if relative['generation'] == '0' and relative['degree'] == '2']
 
 
 def main(args):
-    index_path = args.index
-    pedigree = args.pedigree
-    outputtable = args.output
-    mother_path = args.mother
-    father_path = args.father
-    analysis = args.analysistype
+    index = {'sex': args.index[0], 'file_path': args.index[1]}
+    output = args.output
+    relatives = check_input(args.relative)
+    analysis = args.analysis
     pattern = args.pattern
 
-    if pedigree is not None:
-        ped = ParsePedigree(pedigree)
-        family = ped.parsepedigree()
-
-        for member in family:
-            if member['index'] == 1:
-                index = member
-                index_path = index['path']
-        if analysis is not 'siblings':
-            for member in family:
-                if member['id'] == index['mother']:
-                    mother_path = member['path']
-            for member in family:
-                if member['id'] == index['father']:
-                    father_path = member['path']
-
     if analysis == 'trio':
-        trio(index_path, mother_path, father_path, pattern).to_csv(
-            outputtable, index=False)
+        father, mother = get_parents(relatives)
+        trio(index, father, mother, pattern).to_csv(output, index=False)
 
     if analysis == 'siblings':
-        siblings(index, family).to_csv(outputtable, index=False)
+        siblings_list = get_siblings(relatives)
+        siblings(index, siblings_list).to_csv(output, index=False)
 
     if analysis == 'both':
-        dfindex = trio(index_path, mother_path, father_path, pattern).to_csv(
-            outputtable, index=False)
-        siblings(index, family, dfindex).to_csv(outputtable, index=False)
-
-class MultiGenomeAnalysis(object):
-
-    def __init__(self):
-        """TODO: to be defined1. """
-        pass
-        
-    def siblings(self):
-        pass
-
-    def trio(self):
         pass

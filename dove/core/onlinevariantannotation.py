@@ -3,6 +3,7 @@ __author__ = 'bars'
 
 import os
 import sys
+import json
 import pandas as pd
 from pandas.io.json import json_normalize
 from dove.utils import updateomim
@@ -20,12 +21,13 @@ def chunks(l, n):
         yield l[i:i + n]
 
 
-class OnlineVariantAnnotation(object):
+class OnlineVariantAnnotation:
 
-    def __init__(self, vcf_file=None, mode='file', outputfile=None, omim=False, hpo=False, clinvar=False, resume=False, query_chunks=199, read_chunks=None, table_cols=None):
+    def __init__(self, vcf_file=None, mode='file', output_file=None, json_file=None, omim=False, hpo=False, clinvar=False, resume=False, query_chunks=199, read_chunks=None, table_cols=None):
         self.vcf_file = vcf_file
         self.mode = mode
-        self.outputfile = outputfile
+        self.output_file = output_file
+        self.json_file = json_file
         self.omim = omim
         self.hpo = hpo
         self.clinvar = clinvar
@@ -35,19 +37,17 @@ class OnlineVariantAnnotation(object):
         self.table_cols = table_cols
         self.Eapi = EnsemblApi()
 
-        self.default_cols = ['CHR', 'LOC', 'REF', 'ALT', 'GT', 'AD', 'DP',
-                             'gene_symbol', 'transcript_id', 'id',
-                             'minor_allele_freq', 'gnomad',
-                             'transcript_consequence_terms', 'biotype',
-                             'polyphen_prediction', 'polyphen_score',
-                             'sift_prediction', 'sift_score',
-                             'hgvsc', 'hgvsp', 'clin_sig', 'pubmed',
-                             'motif_name', 'motif_feature_id',
-                             'high_inf_pos', 'motif_pos', 'motif_feature_consequence_terms',
-                             'motif_score_change', 'regulatory_feature_id',
-                             'regulatory_feature_consequence_terms']
+        self.default_cols = [
+            'CHR', 'POS', 'REF', 'ALT', 'GT', 'AD', 'DP',
+            'gene_symbol', 'transcript_id', 'id',
+            'minor_allele_freq', 'gnomad', 'canonical',
+            'transcript_consequence_terms', 'impact', 'biotype',
+            'polyphen_prediction', 'polyphen_score',
+            'sift_prediction', 'sift_score',
+            'hgvsc', 'hgvsp', 'clin_sig', 'pubmed'
+        ]
 
-        if self.table_cols == None:
+        if self.table_cols is None:
             self.table_cols = self.default_cols
         else:
             if self.table_cols[0] == '+':
@@ -55,36 +55,35 @@ class OnlineVariantAnnotation(object):
             else:
                 pass
 
-        if self.omim == True:
+        if self.omim:
             if not os.path.exists(cache_path + '/omim.csv'):
                 # This functions resets self.omim to True or False
                 self.omim = self.try_download('omim')
-                if self.omim == True:  # Thats why there is a second check.
+                if self.omim:  # Thats why there is a second check.
                     self.table_cols.insert(
                         len(self.table_cols), 'omim_phenotypes')
             else:
                 self.table_cols.insert(len(self.table_cols), 'omim_phenotypes')
 
-        if self.hpo == True:
+        if self.hpo:
             if not os.path.exists(cache_path + '/hpo.csv'):
                 self.hpo = self.try_download('HPO')
-                if self.hpo == True:
+                if self.hpo:
                     self.table_cols.insert(
                         len(self.table_cols), 'HPO_term_names')
             else:
                 self.table_cols.insert(len(self.table_cols), 'HPO_term_names')
 
-        if self.clinvar == True:
+        if self.clinvar:
             if not os.path.exists(cache_path + '/clinvar.vcf.gz'):
                 self.clinvar = self.try_download('clinvar')
-                if self.clinvar == True:
+                if self.clinvar:
                     self.read_clinvar_vcf()
             else:
                 self.read_clinvar_vcf()
 
     def read_clinvar_vcf(self):
         with Vcf(cache_path + '/clinvar.vcf.gz') as vcf:
-            generic_header = vcf.generic_header
             self.cln_df = vcf.get_variant_info(concat=True, drop=True)
         self.cln_df = self.cln_df[[col for col in list(
             self.cln_df) if col.startswith('CLN')] + ['CHROM', 'POS', 'ALT']]
@@ -93,9 +92,15 @@ class OnlineVariantAnnotation(object):
         self.cln_df.columns = ['CHR'] + list(self.cln_df)[1:]
 
     def process_vcf(self):
-        self.df_vcf['input'] = self.df_vcf['CHROM'].map(str) + ' ' + \
-            self.df_vcf['POS'].map(str) + ' ' + self.df_vcf['ID'].map(str) + ' ' + self.df_vcf['REF'].map(str) + \
-            ' ' + self.df_vcf['ALT'].map(str)  # create vep input
+        if not self.json_file:
+            self.df_vcf['input'] = self.df_vcf['CHROM'].map(str) + ' ' + \
+                self.df_vcf['POS'].map(str) + ' ' + self.df_vcf['ID'].map(str) + ' ' + self.df_vcf['REF'].map(str) + \
+                ' ' + self.df_vcf['ALT'].map(str)  # create vep input
+        else:
+            self.df_vcf['input'] = self.df_vcf[self.header].apply(
+                lambda x: '\t'.join(x.astype(str)),
+                axis=1
+            )
 
     def parse_colocated(self):
         popkeys = ['assembly_name', 'strand', 'id']
@@ -126,7 +131,7 @@ class OnlineVariantAnnotation(object):
 
     def parse_table(self):
         self.table_data = []
-        consequence_list = ['transcript_consequences',
+        consequence_list = ['transcript_consequences', 'intergenic_consequences',
                             'regulatory_feature_consequences', 'motif_feature_consequences']
         for variant in self.data:
             for c in consequence_list:
@@ -150,11 +155,11 @@ class OnlineVariantAnnotation(object):
                                       on=['CHR', 'POS', 'ALT'], how='left')
 
     def write_table(self):
-        if os.path.exists(self.outputfile):
+        if os.path.exists(self.output_file):
             self.df_anno_table.to_csv(
-                self.outputfile, index=False, header=False, mode='a')
+                self.output_file, index=False, header=False, mode='a')
         else:
-            self.df_anno_table.to_csv(self.outputfile, index=False,)
+            self.df_anno_table.to_csv(self.output_file, index=False,)
 
     def create_table(self):
         self.df_anno_table = pd.DataFrame.from_dict(
@@ -165,15 +170,15 @@ class OnlineVariantAnnotation(object):
         else:
             self.df_anno_table = pd.merge(
                 self.df_vcf[['input', 'POS', 'GT', 'AD', 'DP']], self.df_anno_table, on='input')
-            self.df_anno_table['LOC'] = self.df_anno_table['start'].map(
-                str) + '-' + self.df_anno_table['end'].map(str)
-            self.df_anno_table['CHR'], self.df_anno_table['start_1'], self.df_anno_table['id_1'], self.df_anno_table['REF'], self.df_anno_table['ALT'] = self.df_anno_table['input'].str.split(
-                ' ', 4).str
-            if self.omim == True:
+            if self.json_file:
+                self.df_anno_table['CHR'], self.df_anno_table['start_1'], self.df_anno_table['id_1'], self.df_anno_table['REF'], self.df_anno_table['ALT'], self.df_anno_table['rest'] = self.df_anno_table['input'].str.split(n=5).str
+            else:
+                self.df_anno_table['CHR'], self.df_anno_table['start_1'], self.df_anno_table['id_1'], self.df_anno_table['REF'], self.df_anno_table['ALT'] = self.df_anno_table['input'].str.split(n=4).str
+            if self.omim:
                 self.gene_base_annotation(os.path.join(cache_path, 'omim.csv'))
-            if self.hpo == True:
+            if self.hpo:
                 self.gene_base_annotation(os.path.join(cache_path, 'hpo.csv'))
-            if self.clinvar == True:
+            if self.clinvar:
                 self.position_base_annotation(self.cln_df)
 
             self.add_missing_cols()
@@ -223,10 +228,8 @@ class OnlineVariantAnnotation(object):
                     continue
 
     def try_resume(self):
-        if os.path.exists(self.outputfile):
-            df_existing = pd.read_csv(self.outputfile)
-            df_existing['POS'], df_existing['END'] = df_existing['LOC'].str.split(
-                '-').str
+        if os.path.exists(self.output_file):
+            df_existing = pd.read_csv(self.output_file)
             df_existing['ID'] = '.'
             df_existing['input'] = df_existing['CHR'].map(str) + ' ' + \
                 df_existing['POS'].map(str) + ' ' + df_existing['ID'] + ' ' + df_existing['REF'] + \
@@ -241,14 +244,14 @@ class OnlineVariantAnnotation(object):
             vcf_parser.vdf = vcf_parser.get_sample_format(concat=True)
             if self.read_chunks is None:
                 self.df_vcf = vcf_parser.vdf
-                if self.outputfile is not None:
+                if self.output_file is not None:
                     self.annotate_to_file()
                 else:
                     return self.annotate_to_df()
             else:
                 for chunk in vcf_parser.vdf:
                     self.df_vcf = chunk
-                    if self.outputfile is not None:
+                    if self.output_file is not None:
                         self.annotate_to_file()
                     else:
                         return self.annotate_to_df()
@@ -259,21 +262,32 @@ class OnlineVariantAnnotation(object):
         sys.stdout.write('Started ensembl VEP for {}\nNumber of variants {}\n'.format(
             self.header[-1], len(self.df_vcf)))
 
-        if not self.resume and os.path.exists(self.outputfile) and self.read_chunks is None:
-            os.remove(self.outputfile)
+        if not self.resume and os.path.exists(self.output_file) and self.read_chunks is None:
+            os.remove(self.output_file)
 
-        if self.resume and os.path.exists(self.outputfile):
+        if self.resume and os.path.exists(self.output_file):
             sys.stdout.write('Resuming...\n')
             query_variants = self.try_resume()
         else:
             query_variants = self.df_vcf['input'].tolist()
 
-        for chunk in chunks(query_variants, self.query_chunks):
-            self.data = self.Eapi.ensemblapi(chunk)
-            self.parse_colocated()
-            self.parse_table()
-            self.create_table()
-            self.write_table()
+        if self.json_file is None:
+            for chunk in chunks(query_variants, self.query_chunks):
+                self.data = self.Eapi.ensemblapi(chunk)
+                self.parse_colocated()
+                self.parse_table()
+                self.create_table()
+                self.write_table()
+        else:
+            with open(self.json_file) as f:
+                self.jdata = json.loads('[{}]'.format(
+                    ','.join(f.read().splitlines())))
+            for chunk in chunks(self.jdata, self.query_chunks):
+                self.data = chunk
+                self.parse_colocated()
+                self.parse_table()
+                self.create_table()
+                self.write_table()
         sys.stdout.write(
             'Finished annotation for {}\n'.format(self.header[-1]))
 
@@ -281,32 +295,38 @@ class OnlineVariantAnnotation(object):
         self.process_vcf()
         query_variants = self.df_vcf['input'].tolist()
         df_anno_tables = []
-        for chunk in chunks(query_variants, self.query_chunks):
-            self.data = self.Eapi.ensemblapi(chunk)
-            self.parse_colocated()
-            self.parse_table()
-            self.create_table()
-            df_anno_tables.append(self.df_anno_table)
+
+        if self.json_file is None:
+            for chunk in chunks(query_variants, self.query_chunks):
+                self.data = self.Eapi.ensemblapi(chunk)
+                self.parse_colocated()
+                self.parse_table()
+                self.create_table()
+                df_anno_tables.append(self.df_anno_table)
+        else:
+            with open(self.json_file) as f:
+                self.jdata = json.loads('[{}]'.format(
+                    ','.join(f.read().splitlines())))
+            for chunk in chunks(self.jdata, self.query_chunks):
+                self.data = chunk
+                self.parse_colocated()
+                self.parse_table()
+                self.create_table()
+                df_anno_tables.append(self.df_anno_table)
         return pd.concat(df_anno_tables)
 
 
 def main(args):
-    vcf_file = args.input
-    outputfile = args.output
-    omim = args.omim
-    hpo = args.hpo
-    clinvar = args.clinvar
-    resume = args.resume
-    query_chunks = args.query_chunks
-    read_chunks = args.read_chunks
-    table_cols = args.table_cols
-
-    OVA = OnlineVariantAnnotation(vcf_file=vcf_file,
-                                  outputfile=outputfile,
-                                  omim=omim,
-                                  hpo=hpo,
-                                  clinvar=clinvar,
-                                  resume=resume,
-                                  query_chunks=query_chunks,
-                                  read_chunks=read_chunks, table_cols=table_cols)
+    OVA = OnlineVariantAnnotation(
+        vcf_file=args.input,
+        output_file=args.output,
+        json_file=args.json,
+        omim=args.omim,
+        hpo=args.hpo,
+        clinvar=args.clinvar,
+        resume=args.resume,
+        query_chunks=args.query_chunks,
+        read_chunks=args.read_chunks,
+        table_cols=args.table_cols
+    )
     OVA.annotate()
